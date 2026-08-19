@@ -93,7 +93,7 @@ test('discover labels an account with no profile yet', () => {
 test('table aligns every column, including a row whose usage failed', () => {
   const accounts = [{ id: 'a', name: 'personal', plan: 'max 20x' }, { id: 'b', name: 'work', plan: 'max 5x' }]
   const usage = {
-    a: { five: { pct: 9, resets: '2026-08-19T14:00:00Z' }, week: { pct: 91 } },
+    a: { five: { pct: 9, resets: '2026-08-19T14:00:00Z' }, week: { pct: 91, resets: '2026-08-26T15:00:00Z' } },
     b: { error: 'logged out' }
   }
   const lines = table(accounts, usage).split('\n')
@@ -101,6 +101,18 @@ test('table aligns every column, including a row whose usage failed', () => {
   assert.equal(lines[0].indexOf('5h') + 1, lines[1].indexOf('9%') + 1, 'the 5h header sits over the 5h number')
   assert.equal(lines[0].indexOf('week') + 3, lines[1].indexOf('91%') + 2, 'the week header sits over the week number')
   assert.match(lines[2], /logged out/)
+})
+
+test('table shows a reset per window, not just the 5h one', () => {
+  const accounts = [{ id: 'a', name: 'personal', plan: 'max 20x' }]
+  const usage = { a: { five: { pct: 9, resets: '2026-08-19T14:00:00Z' }, week: { pct: 91, resets: '2026-08-26T15:00:00Z' } } }
+  const [head, row] = table(accounts, usage).split('\n')
+  assert.equal(head.match(/resets/g).length, 2, 'one resets header per window')
+  // Both reset headers sit at or left of their value, and in window order.
+  const fiveAt = row.indexOf(until('2026-08-19T14:00:00Z'))
+  const weekAt = row.indexOf(until('2026-08-26T15:00:00Z'))
+  assert.ok(fiveAt > row.indexOf('9%') && fiveAt < row.indexOf('91%'), '5h reset sits between the two percentages')
+  assert.ok(weekAt > row.indexOf('91%'), 'week reset sits after the week percentage')
 })
 
 test('table points the arrow at the cursor row, not always the first', () => {

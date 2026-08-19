@@ -1,16 +1,16 @@
 # c
 
 Pick a Claude Code account and launch it, showing each account's 5-hour and
-weekly usage with the time until reset. One command in place of a drawer full
-of `CLAUDE_CONFIG_DIR=... claude` aliases.
+weekly usage, each with the time until its own reset. One command in place of
+a drawer full of `CLAUDE_CONFIG_DIR=... claude` aliases.
 
 ```
 $ c
 
-   account   plan       5h  week  resets in
-→1 personal  max 20x   26%    3%  2h 27m
- 2 work      max 5x    71%   44%  41m
- 3 team      pro        4%    1%  3h 12m
+   account   plan       5h  resets   week  resets
+→1 personal  max 20x   26%  2h 27m     3%  4d 6h
+ 2 work      max 5x    71%  41m       44%  2d 11h
+ 3 team      pro        4%  3h 12m     1%  6d 0h
 
   yolo on · worktree off  ·  [enter] personal   ↑↓ move   1-3 pick   y yolo   w worktree   r refresh   q quit
 ```

@@ -124,18 +124,22 @@ const pct = w => {
   return `${w.pct >= 80 ? C.red : w.pct >= 50 ? C.yel : C.grn}${s}${C.off}`
 }
 
+// Each window prints its own reset, padded to the widest value `until` makes
+// ("2h 27m"), so the week column lines up under its header.
+const resets = w => `${C.dim}${until(w?.resets).padEnd(6)}${C.off}`
+
 export function table (accounts, usage = {}, { selectable = false, cursor = 0 } = {}) {
   const w = Math.max(7, ...accounts.map(a => a.name.length))
   const p = Math.max(4, ...accounts.map(a => (a.plan || '?').length))
-  const rows = [`   ${C.dim}${'account'.padEnd(w)}  ${'plan'.padEnd(p)}    5h  week  resets in${C.off}`]
+  const rows = [`   ${C.dim}${'account'.padEnd(w)}  ${'plan'.padEnd(p)}    5h  resets   week  resets${C.off}`]
   accounts.forEach((a, i) => {
     const u = usage[a.id] || {}
     const mark = i === cursor ? `${C.cya}→${C.off}` : ' '
     const num = selectable ? `${C.dim}${i + 1}${C.off}` : ' '
     const right = u.error
       ? `${C.red}${u.error}${C.off}`
-      : `${pct(u.five)}  ${pct(u.week)}  ${until(u.five?.resets)}`
-    rows.push(`${mark}${num} ${C.bold}${a.name.padEnd(w)}${C.off}  ${C.dim}${(a.plan || '?').padEnd(p)}${C.off}  ${right}`)
+      : `${pct(u.five)}  ${resets(u.five)}   ${pct(u.week)}  ${resets(u.week)}`
+    rows.push(`${mark}${num} ${C.bold}${a.name.padEnd(w)}${C.off}  ${C.dim}${(a.plan || '?').padEnd(p)}${C.off}  ${right}`.trimEnd())
   })
   return rows.join('\n')
 }
