@@ -54,9 +54,9 @@ test('planLabel strips the internal tier prefix', () => {
 })
 
 test('sortByRecent puts the last-used account first, unknowns alphabetically last', () => {
-  const accounts = [{ id: 'work' }, { id: 'main' }, { id: 'steve' }]
-  assert.deepEqual(sortByRecent(accounts, ['steve', 'main']).map(a => a.id), ['steve', 'main', 'work'])
-  assert.deepEqual(sortByRecent(accounts, []).map(a => a.id), ['main', 'steve', 'work'])
+  const accounts = [{ id: 'work' }, { id: 'main' }, { id: 'team' }]
+  assert.deepEqual(sortByRecent(accounts, ['team', 'main']).map(a => a.id), ['team', 'main', 'work'])
+  assert.deepEqual(sortByRecent(accounts, []).map(a => a.id), ['main', 'team', 'work'])
 })
 
 test('sortByRecent does not mutate its input', () => {
@@ -67,7 +67,7 @@ test('sortByRecent does not mutate its input', () => {
 
 test('discover finds credentialed dirs only, and never the default-dir sibling caches', () => {
   const home = fakeHome({
-    '.claude': { displayName: 'Simo' },
+    '.claude': { displayName: 'personal' },
     '.claude-work': { displayName: 'Work', organizationRateLimitTier: 'default_claude_max_5x' },
     '.claude-mem': null // a plugin cache dir: no credentials, not an account
   })
@@ -77,11 +77,11 @@ test('discover finds credentialed dirs only, and never the default-dir sibling c
 })
 
 test('discover falls back to the legacy ~/.claude.json for the default dir', () => {
-  const home = fakeHome({ '.claude': { displayName: 'Simo' } })
+  const home = fakeHome({ '.claude': { displayName: 'personal' } })
   // The tier lives only in the legacy file for the default config dir.
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { organizationRateLimitTier: 'default_claude_max_20x' } }))
   const [acc] = discover(home, [])
-  assert.equal(acc.name, 'Simo', 'the per-dir file still wins for fields it has')
+  assert.equal(acc.name, 'personal', 'the per-dir file still wins for fields it has')
   assert.equal(acc.plan, 'max 20x', 'and the legacy file fills in the ones it does not')
 })
 
@@ -91,7 +91,7 @@ test('discover labels an account with no profile yet', () => {
 })
 
 test('table aligns every column, including a row whose usage failed', () => {
-  const accounts = [{ id: 'a', name: 'Simo', plan: 'max 20x' }, { id: 'b', name: 'Steve', plan: 'max 5x' }]
+  const accounts = [{ id: 'a', name: 'personal', plan: 'max 20x' }, { id: 'b', name: 'work', plan: 'max 5x' }]
   const usage = {
     a: { five: { pct: 9, resets: '2026-08-19T14:00:00Z' }, week: { pct: 91 } },
     b: { error: 'logged out' }
@@ -104,7 +104,7 @@ test('table aligns every column, including a row whose usage failed', () => {
 })
 
 test('table points the arrow at the cursor row, not always the first', () => {
-  const accounts = [{ id: 'a', name: 'Simo' }, { id: 'b', name: 'Steve' }, { id: 'c', name: '2sync' }]
+  const accounts = [{ id: 'a', name: 'personal' }, { id: 'b', name: 'work' }, { id: 'c', name: 'team' }]
   const rowFor = cursor => table(accounts, {}, { cursor }).split('\n').findIndex(l => l.includes('\u2192'))
   assert.equal(rowFor(0), 1, 'row 1 is the first account, row 0 is the header')
   assert.equal(rowFor(2), 3)
@@ -112,8 +112,8 @@ test('table points the arrow at the cursor row, not always the first', () => {
 })
 
 test('table survives an account it has no cached usage for', () => {
-  const out = table([{ id: 'a', name: 'Simo', plan: 'pro' }], {})
-  assert.match(out, /Simo/)
+  const out = table([{ id: 'a', name: 'personal', plan: 'pro' }], {})
+  assert.match(out, /personal/)
   assert.doesNotMatch(out, /undefined|NaN/)
 })
 

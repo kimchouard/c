@@ -7,12 +7,12 @@ of `CLAUDE_CONFIG_DIR=... claude` aliases.
 ```
 $ c
 
-   account  plan      5h  week  resets in
-→1 Simo     max 20x   26%    3%  2h 27m
- 2 Steve    max 5x    71%   44%  41m
- 3 2sync    max 20x    4%    1%  3h 12m
+   account   plan       5h  week  resets in
+→1 personal  max 20x   26%    3%  2h 27m
+ 2 work      max 5x    71%   44%  41m
+ 3 team      pro        4%    1%  3h 12m
 
-  yolo on · worktree off  ·  [enter] Simo   ↑↓ move   1-3 pick   y yolo   w worktree   r refresh   q quit
+  yolo on · worktree off  ·  [enter] personal   ↑↓ move   1-3 pick   y yolo   w worktree   r refresh   q quit
 ```
 
 ## Install
@@ -113,17 +113,33 @@ ln -s "$PWD/c.mjs" ~/.local/bin/c
 
 ## Releasing
 
-Versions are tags. From a clean `main`:
+Versions come from the commit messages, so land work on `main` with
+[conventional commits](https://www.conventionalcommits.org):
 
-```bash
-npm version patch        # or minor / major: writes package.json, commits, tags vX.Y.Z
-git push --follow-tags
-```
+| Prefix | Effect |
+|---|---|
+| `fix: ...` | patch, 1.0.0 to 1.0.1 |
+| `feat: ...` | minor, 1.0.0 to 1.1.0 |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major, 1.0.0 to 2.0.0 |
+| `docs:`, `chore:`, `test:`, `refactor:` | no release |
 
-The `release` workflow runs on any `v*` tag: it runs the suite, then publishes
-to npm with the `NPM_TOKEN` repository secret. The first publish of a scoped
-package has to be done by hand (`npm publish`) so npm records the package as
-public.
+The `release` workflow runs release-please on every push to `main`. It keeps a
+single release PR open ("chore(main): release X.Y.Z") holding the version bump
+in `package.json` and the new `CHANGELOG.md` section. Nothing publishes while
+that PR sits there. Merging it tags `vX.Y.Z`, cuts the GitHub release, and
+triggers the publish job, which runs the suite and then `npm publish` with the
+`NPM_TOKEN` repository secret.
+
+`release-please-config.json` and `.release-please-manifest.json` hold the
+release type and the current version. The manifest is the source of truth for
+what ships next, so let release-please edit it rather than bumping
+`package.json` by hand.
+
+Two one-time prerequisites: the `NPM_TOKEN` secret, and "Allow GitHub Actions
+to create and approve pull requests" enabled in the repository's Actions
+settings, without which release-please cannot open its PR. The very first
+publish of a scoped package also has to be done by hand (`npm publish`) so npm
+records it as public.
 
 ## License
 
