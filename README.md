@@ -24,18 +24,15 @@ npm install -g @tonoid/c
 Or run it without installing: `npx @tonoid/c`. Node 18 or newer, no
 dependencies. Linux; see [Limitations](#limitations) for macOS.
 
-From a checkout, so `git pull` updates the installed command:
-
-```bash
-git clone https://github.com/tonoid/c
-ln -s "$PWD/c/c.mjs" ~/.local/bin/c
-```
+npm is the only distribution channel: no Homebrew tap, no apt repo, no
+install script. It is one file, so a checkout on your `PATH` works just as
+well (see [Development](#development)).
 
 `c`, not `cc`, because `cc` is the C compiler. A real command on `PATH` rather
 than a shell alias, so it works from scripts and from any shell, not just an
 interactive one. If the single letter collides with something of yours, rename
-the symlink and set `CMD` at the top of `c.mjs` to match: every message reads
-from it.
+the installed binary and set `CMD` at the top of `c.mjs` to match: every
+message reads from it.
 
 ## Commands
 
@@ -99,12 +96,34 @@ gets a `c <name> [on|off]` subcommand and a db field for free.
 ## Development
 
 ```bash
+git clone https://github.com/tonoid/c
+cd c
 npm test
 ```
 
 The suite is `node:test` and `node:assert` only. It builds throwaway `HOME`
 directories with fake config dirs, so it never reads or writes real accounts
 and never calls the network.
+
+To run the checkout as the real command, so `git pull` updates it:
+
+```bash
+ln -s "$PWD/c.mjs" ~/.local/bin/c
+```
+
+## Releasing
+
+Versions are tags. From a clean `main`:
+
+```bash
+npm version patch        # or minor / major: writes package.json, commits, tags vX.Y.Z
+git push --follow-tags
+```
+
+The `release` workflow runs on any `v*` tag: it runs the suite, then publishes
+to npm with the `NPM_TOKEN` repository secret. The first publish of a scoped
+package has to be done by hand (`npm publish`) so npm records the package as
+public.
 
 ## License
 
