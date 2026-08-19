@@ -1,0 +1,287 @@
+#!/usr/bin/env node
+// c: one command to pick a Claude Code account, with usage at a glance.
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
+export const HOME = os.homedir()
+// The name this is installed as (~/.local/bin/c). Every user-facing message
+// reads from it, so renaming the symlink is a one-line change here.
+const CMD = 'c'
+
+const CONFIG_HOME = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config')
+export const DB = path.join(CONFIG_HOME, CMD, 'db.json')
+const TTL = 60_000 // usage cache lifetime
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+
+const C = process.stdout.isTTY
+  ? { dim: '\x1b[2m', bold: '\x1b[1m', red: '\x1b[31m', yel: '\x1b[33m', grn: '\x1b[32m', cya: '\x1b[36m', off: '\x1b[0m' }
+  : new Proxy({}, { get: () => '' })
+
+export const readJson = (f, fb = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return fb } }
+
+// ---------- db ----------
+// Remembered claude flags. Each key is both the db field and the subcommand
+// that toggles it, so adding another default is one line here.
+export const FLAGS = {
+  yolo: '--dangerously-skip-permissions',
+  worktree: '--worktree'
+}
+
+export function loadDb (file = DB) {
+  const db = readJson(file, {}) || {}
+  db.order ??= []      // account ids, most recently used first
+  db.yolo ??= true     // as the old cy/cys/cy2 aliases did
+  db.worktree ??= false // a worktree per session is opt-in, as cw/cws/cw2 were
+  db.usage ??= {}      // id -> { at, five, week, error }
+  return db
+}
+
+// Flags the db turns on, minus any the caller already typed, so an explicit
+// `--worktree` never sends the flag twice.
+export const defaultFlags = (db, args = []) =>
+  Object.entries(FLAGS).filter(([k]) => db[k]).map(([, f]) => f).filter(f => !args.includes(f))
+
+function saveDb (db, file = DB) {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(db, null, 2))
+}
+
+// ---------- accounts ----------
+// Any ~/.claude* directory holding credentials is an account. Nothing to
+// register: log in with CLAUDE_CONFIG_DIR pointed at a new one and it appears.
+export function discover (home = HOME, order = []) {
+  const accounts = fs.readdirSync(home)
+    .filter(n => n === '.claude' || n.startsWith('.claude-'))
+    .map(n => path.join(home, n))
+    .filter(d => fs.existsSync(path.join(d, '.credentials.json')))
+    .map(dir => {
+      // The default config dir splits its account fields between
+      // ~/.claude/.claude.json and the legacy ~/.claude.json.
+      const legacy = dir === path.join(home, '.claude') ? readJson(path.join(home, '.claude.json'), {})?.oauthAccount : null
+      const acc = { ...legacy, ...readJson(path.join(dir, '.claude.json'), {})?.oauthAccount }
+      return {
+        id: path.basename(dir).replace(/^\.claude-?/, '') || 'main',
+        dir,
+        name: acc.displayName || acc.emailAddress || path.basename(dir),
+        email: acc.emailAddress || '',
+        plan: planLabel(acc.organizationRateLimitTier)
+      }
+    })
+  return sortByRecent(accounts, order)
+}
+
+export const planLabel = tier => (tier || '').replace(/^default_claude_/, '').replace(/_/g, ' ')
+
+export function sortByRecent (accounts, order) {
+  const rank = id => { const i = order.indexOf(id); return i === -1 ? Infinity : i }
+  return [...accounts].sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id))
+}
+
+// ---------- usage ----------
+export async function fetchUsage (dir, now = Date.now()) {
+  const token = readJson(path.join(dir, '.credentials.json'))?.claudeAiOauth?.accessToken
+  if (!token) return { at: now, error: 'no token' }
+  try {
+    const r = await fetch(USAGE_URL, {
+      headers: { authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' },
+      signal: AbortSignal.timeout(8000)
+    })
+    if (!r.ok) return { at: now, error: r.status === 401 ? 'logged out' : `http ${r.status}` }
+    const j = await r.json()
+    const slice = w => w ? { pct: Math.round(w.utilization ?? 0), resets: w.resets_at } : null
+    return { at: now, five: slice(j.five_hour), week: slice(j.seven_day) }
+  } catch (e) {
+    return { at: now, error: e.name === 'TimeoutError' ? 'timeout' : 'offline' }
+  }
+}
+
+async function refresh (accounts, db, force = false) {
+  const stale = accounts.filter(a => force || !db.usage[a.id] || Date.now() - db.usage[a.id].at > TTL)
+  if (!stale.length) return
+  const got = await Promise.all(stale.map(a => fetchUsage(a.dir)))
+  stale.forEach((a, i) => { db.usage[a.id] = got[i] })
+  saveDb(db)
+}
+
+// ---------- rendering ----------
+export function until (iso, now = Date.now()) {
+  if (!iso) return '-'
+  const ms = new Date(iso) - now
+  if (Number.isNaN(ms)) return '-'
+  if (ms <= 0) return 'now'
+  const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24)
+  if (d) return `${d}d ${h % 24}h`
+  if (h) return `${h}h ${m % 60}m`
+  return `${m}m`
+}
+
+const pct = w => {
+  if (!w) return `${C.dim}   -${C.off}`
+  const s = String(w.pct).padStart(3) + '%'
+  return `${w.pct >= 80 ? C.red : w.pct >= 50 ? C.yel : C.grn}${s}${C.off}`
+}
+
+export function table (accounts, usage = {}, { selectable = false, cursor = 0 } = {}) {
+  const w = Math.max(7, ...accounts.map(a => a.name.length))
+  const p = Math.max(4, ...accounts.map(a => (a.plan || '?').length))
+  const rows = [`   ${C.dim}${'account'.padEnd(w)}  ${'plan'.padEnd(p)}    5h  week  resets in${C.off}`]
+  accounts.forEach((a, i) => {
+    const u = usage[a.id] || {}
+    const mark = i === cursor ? `${C.cya}→${C.off}` : ' '
+    const num = selectable ? `${C.dim}${i + 1}${C.off}` : ' '
+    const right = u.error
+      ? `${C.red}${u.error}${C.off}`
+      : `${pct(u.five)}  ${pct(u.week)}  ${until(u.five?.resets)}`
+    rows.push(`${mark}${num} ${C.bold}${a.name.padEnd(w)}${C.off}  ${C.dim}${(a.plan || '?').padEnd(p)}${C.off}  ${right}`)
+  })
+  return rows.join('\n')
+}
+
+// ---------- launching claude ----------
+const claudeBin = () => {
+  const local = path.join(HOME, '.local/bin/claude')
+  return fs.existsSync(local) ? local : 'claude'
+}
+
+const run = (dir, args) =>
+  spawn(claudeBin(), args, { stdio: 'inherit', env: { ...process.env, CLAUDE_CONFIG_DIR: dir } })
+    .on('error', e => { console.error(`${CMD}: cannot run claude (${e.code || e.message})`); process.exit(127) })
+    .on('exit', code => process.exit(code ?? 0))
+
+function launch (acc, args, db) {
+  db.order = [acc.id, ...db.order.filter(id => id !== acc.id)]
+  saveDb(db)
+  run(acc.dir, [...defaultFlags(db, args), ...args])
+}
+
+// ---------- menu ----------
+function menu (accounts, db) {
+  return new Promise(resolve => {
+    const tty = process.stdout.isTTY
+    let cursor = 0
+    let drawn = 0 // lines the last draw left above the terminal cursor
+    // Redraw in place: step back over the block we drew last and clear from
+    // there, so a keystroke updates the menu instead of scrolling a new copy.
+    // ponytail: assumes the footer fits one terminal line; a window narrow
+    // enough to wrap it leaves a stale line behind. Shorten the hints then.
+    const draw = (note = '') => {
+      if (drawn && tty) process.stdout.write(`\x1b[${drawn}A\r\x1b[J`)
+      const flag = (k, label) => `${C.dim}${label} ${db[k] ? `${C.grn}on` : `${C.red}off`}${C.off}`
+      const foot = note
+        ? `${C.dim}${note}${C.off}`
+        : `${flag('yolo', 'yolo')} ${C.dim}·${C.off} ${flag('worktree', 'worktree')}${C.dim}  ·  [enter] ${accounts[cursor].name}   ↑↓ move   1-${accounts.length} pick   y yolo   w worktree   r refresh   q quit${C.off} `
+      process.stdout.write('\n' + table(accounts, db.usage, { selectable: true, cursor }) + '\n\n  ' + foot)
+      drawn = accounts.length + 3
+    }
+    if (tty) process.stdout.write('\x1b[?25l')
+    draw()
+    process.stdin.setRawMode?.(true)
+    process.stdin.resume()
+    process.stdin.setEncoding('utf8')
+    const done = v => {
+      process.stdin.setRawMode?.(false)
+      process.stdin.pause()
+      process.stdout.write(tty ? '\x1b[?25h\n' : '\n')
+      resolve(v)
+    }
+    process.stdin.on('data', async key => {
+      // Arrows arrive as a whole escape sequence, so a bare \x1b is still quit.
+      if (key === '\x1b[A' || key === '\x1b[B') {
+        cursor = (cursor + (key === '\x1b[A' ? accounts.length - 1 : 1)) % accounts.length
+        return draw()
+      }
+      if (key === '\r' || key === '\n') return done(accounts[cursor])
+      if (key === 'q' || key === '\x03' || key === '\x1b') return done(null)
+      if (key === 'y' || key === 'w') {
+        const k = key === 'y' ? 'yolo' : 'worktree'
+        db[k] = !db[k]
+        saveDb(db)
+        return draw()
+      }
+      if (key === 'r') { draw('refreshing...'); await refresh(accounts, db, true); return draw() }
+      const n = Number(key)
+      if (n >= 1 && n <= accounts.length) return done(accounts[n - 1])
+    })
+  })
+}
+
+// ---------- cli ----------
+const pad = s => s.padEnd(20 + CMD.length)
+const HELP = `${CMD}: one command for several Claude Code accounts
+
+  ${pad(CMD)}pick an account (usage table, enter = last used)
+  ${pad(CMD + ' <args...>')}launch the last-used account, args go to claude
+  ${pad(CMD + ' -a <id> [args]')}launch a specific account
+  ${pad(CMD + ' status')}show the usage table and exit
+  ${pad(CMD + ' add <id>')}log in to a new account in ~/.claude-<id>
+  ${pad(CMD + ' yolo [on|off]')}toggle the --dangerously-skip-permissions default
+  ${pad(CMD + ' worktree [on|off]')}toggle the --worktree default (a git worktree per session)
+  ${CMD} version
+  ${CMD} help
+
+A prompt that collides with a subcommand goes through -a, e.g. ${CMD} -a main status.
+State lives in ${DB.replace(HOME, '~')}`
+
+async function main (argv) {
+  const db = loadDb()
+
+  if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') {
+    console.log(HELP)
+    return
+  }
+
+  if (argv[0] === 'version') {
+    console.log(readJson(fileURLToPath(new URL('./package.json', import.meta.url)), {}).version || 'dev')
+    return
+  }
+
+  if (argv[0] === 'add') {
+    const id = argv[1]
+    if (!id || !/^[\w.-]+$/.test(id)) { console.error(`usage: ${CMD} add <id>   e.g. ${CMD} add work`); process.exit(1) }
+    const dir = path.join(HOME, id === 'main' ? '.claude' : `.claude-${id}`)
+    if (fs.existsSync(path.join(dir, '.credentials.json'))) {
+      console.error(`${CMD}: ${dir.replace(HOME, '~')} is already logged in (${CMD} -a ${id})`)
+      process.exit(1)
+    }
+    fs.mkdirSync(dir, { recursive: true })
+    console.log(`Logging in to ${dir.replace(HOME, '~')}. It joins the list once done.\n`)
+    run(dir, ['auth', 'login'])
+    return new Promise(() => {}) // run() exits this process once claude is done
+  }
+
+  const accounts = discover(HOME, db.order)
+  if (!accounts.length) {
+    console.error(`${CMD}: no logged-in ~/.claude* config dirs found, run \`${CMD} add <id>\``)
+    process.exit(1)
+  }
+
+  if (argv[0] === 'status' || argv[0] === 'ls') {
+    await refresh(accounts, db)
+    console.log('\n' + table(accounts, db.usage) + `\n\n  ${C.dim}yolo ${db.yolo ? 'on' : 'off'}  ·  worktree ${db.worktree ? 'on' : 'off'}  ·  default ${accounts[0].name}${C.off}\n`)
+  } else if (Object.hasOwn(FLAGS, argv[0] ?? '')) {
+    const k = argv[0]
+    db[k] = argv[1] ? argv[1] === 'on' : !db[k]
+    saveDb(db)
+    console.log(`${k} ${db[k] ? `on (${FLAGS[k]})` : 'off'}`)
+  } else if (argv[0] === '-a' || argv[0] === '--account') {
+    const want = String(argv[1] ?? '').toLowerCase()
+    const acc = accounts.find(a => a.id.toLowerCase() === want || a.name.toLowerCase() === want)
+    if (!acc) { console.error(`${CMD}: no account "${argv[1]}" (have: ${accounts.map(a => a.id).join(', ')})`); process.exit(1) }
+    launch(acc, argv.slice(2), db)
+  } else if (argv.length) {
+    launch(accounts[0], argv, db)
+  } else {
+    await refresh(accounts, db)
+    const picked = await menu(accounts, db)
+    if (picked) launch(picked, [], db)
+  }
+}
+
+// Compare real paths: argv[1] keeps the symlink it was invoked through
+// (~/.local/bin/c) while import.meta.url is already resolved, and a
+// plain string compare would silently skip main() on every installed run.
+const invokedAs = () => { try { return fs.realpathSync(process.argv[1] ?? '') } catch { return '' } }
+if (invokedAs() === fileURLToPath(import.meta.url)) await main(process.argv.slice(2))
