@@ -135,11 +135,10 @@ release type and the current version. The manifest is the source of truth for
 what ships next, so let release-please edit it rather than bumping
 `package.json` by hand.
 
-Two one-time prerequisites: the `NPM_TOKEN` secret, and "Allow GitHub Actions
-to create and approve pull requests" enabled in the repository's Actions
-settings, without which release-please cannot open its PR. The very first
-publish of a scoped package also has to be done by hand (`npm publish`) so npm
-records it as public.
+Published releases carry npm [provenance](https://docs.npmjs.com/generating-provenance-statements),
+which links the tarball to the workflow run that built it. That needs the
+`id-token: write` permission the publish job already declares, and a public
+repository.
 
 ## License
 

@@ -24,6 +24,9 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # npm provenance attestation
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,8 +35,6 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       # No dependencies to install: the suite is node:test and node:assert.
       - run: npm test
-      # Add --provenance once the repo is public; npm refuses to attest a
-      # package published from a private one.
-      - run: npm publish
+      - run: npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
