@@ -7,7 +7,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { until, planLabel, sortByRecent, discover, table, loadDb, fetchUsage, defaultFlags } from '../c.mjs'
+import { until, planLabel, sortByRecent, discover, table, loadDb, fetchUsage, defaultFlags, keychainService } from '../c.mjs'
 
 const CLI = fileURLToPath(new URL('../c.mjs', import.meta.url))
 const NOW = Date.parse('2026-08-19T12:00:00Z')
@@ -83,6 +83,21 @@ test('discover falls back to the legacy ~/.claude.json for the default dir', () 
   const [acc] = discover(home, [])
   assert.equal(acc.name, 'personal', 'the per-dir file still wins for fields it has')
   assert.equal(acc.plan, 'max 20x', 'and the legacy file fills in the ones it does not')
+})
+
+test('discover keeps an account whose token lives outside the config dir', () => {
+  // macOS: the token is in the login keychain, so there is no .credentials.json.
+  const home = fakeHome({ '.claude-mac': null })
+  fs.writeFileSync(path.join(home, '.claude-mac', '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'me@example.com' } }))
+  assert.deepEqual(discover(home, []).map(a => a.id), ['mac'])
+})
+
+test('keychainService matches an item to the config dir it belongs to', () => {
+  const names = ['Claude Code-credentials', 'Claude Code-credentials-work']
+  assert.equal(keychainService('work', names), 'Claude Code-credentials-work')
+  assert.equal(keychainService('main', names), 'Claude Code-credentials', 'the unnamed item is the default dir')
+  assert.equal(keychainService('team', names), null, 'no guessing for an account with no item')
+  assert.equal(keychainService('main', ['Claude Code']), 'Claude Code', 'a lone claude item is the default dir whatever it is called')
 })
 
 test('discover labels an account with no profile yet', () => {

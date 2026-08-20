@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const HOME = os.homedir()
@@ -21,6 +21,38 @@ const C = process.stdout.isTTY
   : new Proxy({}, { get: () => '' })
 
 export const readJson = (f, fb = null) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return fb } }
+const parse = (s, fb = null) => { try { return JSON.parse(s) } catch { return fb } }
+const MAC = process.platform === 'darwin'
+
+// ---------- credentials ----------
+// Linux and WSL keep the OAuth token in <dir>/.credentials.json. macOS keeps it
+// in the login keychain, so a Mac account is a config dir with no token file.
+export const accountId = dir => path.basename(dir).replace(/^\.claude-?/, '') || 'main'
+
+const sh = (cmd, args) => { const r = spawnSync(cmd, args, { encoding: 'utf8' }); return r.status === 0 ? r.stdout : null }
+
+// Listing attributes unlocks nothing, so this stays prompt-free and is worth
+// doing once. Reading a secret below is what may raise the keychain dialog.
+let cachedServices
+export const keychainServices = (dump = () => sh('security', ['dump-keychain']) || '') =>
+  (cachedServices ??= [...dump().matchAll(/"svce"<blob>="([^"]*)"/g)].map(m => m[1]).filter(s => /claude/i.test(s)))
+
+// Only the item name says which account it belongs to. Claude Code stores the
+// default one as "Claude Code-credentials" and puts the id of ~/.claude-<id>
+// in the name of the others.
+export function keychainService (id, names = keychainServices()) {
+  const hit = names.find(n => new RegExp(`(^|[^a-z0-9])${id.replace(/[^\w.-]/g, '')}([^a-z0-9]|$)`, 'i').test(n))
+  if (hit || id !== 'main') return hit || null
+  return names.find(n => /^claude code-credentials$/i.test(n)) || (names.length === 1 ? names[0] : null)
+}
+
+export function readCreds (dir) {
+  const file = readJson(path.join(dir, '.credentials.json'))
+  if (file || !MAC) return file
+  const svc = keychainService(accountId(dir))
+  const raw = svc && sh('security', ['find-generic-password', '-s', svc, '-w'])
+  return raw ? parse(raw.trim()) : null
+}
 
 // ---------- db ----------
 // Remembered claude flags. Each key is both the db field and the subcommand
@@ -50,20 +82,34 @@ function saveDb (db, file = DB) {
 }
 
 // ---------- accounts ----------
-// Any ~/.claude* directory holding credentials is an account. Nothing to
-// register: log in with CLAUDE_CONFIG_DIR pointed at a new one and it appears.
+// Any ~/.claude* directory holding an account is one. Nothing to register: log
+// in with CLAUDE_CONFIG_DIR pointed at a new one and it appears.
+//
+// The default config dir splits its account fields between ~/.claude/.claude.json
+// and the legacy ~/.claude.json.
+const oauthAccount = (dir, home) => ({
+  ...(dir === path.join(home, '.claude') ? readJson(path.join(home, '.claude.json'), {})?.oauthAccount : null),
+  ...readJson(path.join(dir, '.claude.json'), {})?.oauthAccount
+})
+
+// A token file proves an account without being required. On macOS the token
+// sits in the keychain, so the profile of whoever logged in stands in for it.
+export function loggedIn (dir, home = HOME) {
+  if (fs.existsSync(path.join(dir, '.credentials.json'))) return true
+  const acc = oauthAccount(dir, home)
+  if (acc.accountUuid || acc.emailAddress) return true
+  return MAC && !!keychainService(accountId(dir))
+}
+
 export function discover (home = HOME, order = []) {
-  const accounts = fs.readdirSync(home)
-    .filter(n => n === '.claude' || n.startsWith('.claude-'))
-    .map(n => path.join(home, n))
-    .filter(d => fs.existsSync(path.join(d, '.credentials.json')))
+  const accounts = fs.readdirSync(home, { withFileTypes: true })
+    .filter(e => (e.isDirectory() || e.isSymbolicLink()) && (e.name === '.claude' || e.name.startsWith('.claude-')))
+    .map(e => path.join(home, e.name))
+    .filter(dir => loggedIn(dir, home))
     .map(dir => {
-      // The default config dir splits its account fields between
-      // ~/.claude/.claude.json and the legacy ~/.claude.json.
-      const legacy = dir === path.join(home, '.claude') ? readJson(path.join(home, '.claude.json'), {})?.oauthAccount : null
-      const acc = { ...legacy, ...readJson(path.join(dir, '.claude.json'), {})?.oauthAccount }
+      const acc = oauthAccount(dir, home)
       return {
-        id: path.basename(dir).replace(/^\.claude-?/, '') || 'main',
+        id: accountId(dir),
         dir,
         name: acc.displayName || acc.emailAddress || path.basename(dir),
         email: acc.emailAddress || '',
@@ -82,7 +128,7 @@ export function sortByRecent (accounts, order) {
 
 // ---------- usage ----------
 export async function fetchUsage (dir, now = Date.now()) {
-  const token = readJson(path.join(dir, '.credentials.json'))?.claudeAiOauth?.accessToken
+  const token = readCreds(dir)?.claudeAiOauth?.accessToken
   if (!token) return { at: now, error: 'no token' }
   try {
     const r = await fetch(USAGE_URL, {
@@ -246,7 +292,7 @@ async function main (argv) {
     const id = argv[1]
     if (!id || !/^[\w.-]+$/.test(id)) { console.error(`usage: ${CMD} add <id>   e.g. ${CMD} add work`); process.exit(1) }
     const dir = path.join(HOME, id === 'main' ? '.claude' : `.claude-${id}`)
-    if (fs.existsSync(path.join(dir, '.credentials.json'))) {
+    if (loggedIn(dir)) {
       console.error(`${CMD}: ${dir.replace(HOME, '~')} is already logged in (${CMD} -a ${id})`)
       process.exit(1)
     }

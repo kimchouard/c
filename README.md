@@ -39,7 +39,7 @@ npm install -g @tonoid/c
 ```
 
 Or run it without installing: `npx @tonoid/c`. Node 18 or newer, no
-dependencies. Linux; see [Limitations](#limitations) for macOS.
+dependencies. Linux and macOS.
 
 npm is the only distribution channel: no Homebrew tap, no apt repo, no
 install script. It is one file, so a checkout on your `PATH` works just as
@@ -74,10 +74,18 @@ yourself, so `c --worktree` with the default already on still passes it once.
 
 ## How it works
 
-Every `~/.claude*` directory holding a `.credentials.json` is an account, so
-there is nothing to register: `c add work`, or any manual `CLAUDE_CONFIG_DIR`
-login, just shows up. Directories without credentials (plugin caches such as
-`~/.claude-mem`) are ignored.
+Every `~/.claude*` directory a login left behind is an account, so there is
+nothing to register. `c add work`, or any manual `CLAUDE_CONFIG_DIR` login,
+just shows up. A directory counts when it holds a `.credentials.json`, or the
+profile of whoever logged in, or a matching keychain item on macOS. Plugin
+caches such as `~/.claude-mem` hold none of those and are ignored.
+
+On macOS the token is in the login keychain instead of `.credentials.json`, so
+`c` reads it with `security find-generic-password`. The first read pops the
+standard keychain dialog; Always Allow makes it the last one. Items are matched
+to config dirs by name (`Claude Code-credentials` is the default `~/.claude`,
+and the id in `~/.claude-<id>` has to appear in the item name), so an account
+whose item is named some other way lists with `no token` instead of usage.
 
 Rows sort most-recently-used first, so `c` then enter is always the account you
 were just in.
@@ -105,8 +113,9 @@ gets a `c <name> [on|off]` subcommand and a db field for free.
 
 - Subcommand names shadow prompts. `c status` prints the table; to send that
   word as a prompt use `c -a main status`.
-- macOS keeps Claude Code credentials in the Keychain rather than in
-  `.credentials.json`, so discovery finds nothing there. Linux only for now.
+- On macOS, whether two accounts can coexist depends on Claude Code giving each
+  `CLAUDE_CONFIG_DIR` its own keychain item. If your version reuses one item,
+  `c add` overwrites the login you already had rather than adding to it.
 - The menu assumes its footer fits on one terminal line; a very narrow window
   can leave a stale line behind on redraw.
 
