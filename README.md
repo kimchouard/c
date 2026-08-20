@@ -4,6 +4,23 @@ Pick a Claude Code account and launch it, showing each account's 5-hour and
 weekly usage, each with the time until its own reset. One command in place of
 a drawer full of `CLAUDE_CONFIG_DIR=... claude` aliases.
 
+[![npm](https://img.shields.io/npm/v/@tonoid/c?logo=npm)](https://www.npmjs.com/package/@tonoid/c)
+[![License MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+[![Test](https://github.com/tonoid/c/actions/workflows/test.yml/badge.svg)](https://github.com/tonoid/c/actions/workflows/test.yml)
+
+**Who it's for**: anyone running Claude Code across more than one account,
+personal and work, or a couple of Max subscriptions, who is tired of guessing
+which one still has quota left before starting a session.
+
+> ⚠️ **Disclaimer**: the code in this project was generated with
+> [Claude Code](https://claude.com/claude-code) (Anthropic), then **tested and
+> reviewed manually** by a human. It is provided as is, without warranty. It
+> reads the OAuth tokens Claude Code already wrote into your config
+> directories, so before running it: read the code (one ~300-line file) and
+> check for yourself that no credential leaves the machine except as the
+> `authorization` header on the usage call. It is short on purpose, precisely
+> so that reading it stays practical. Issues and PRs welcome.
+
 ```
 $ c
 
@@ -140,6 +157,32 @@ which links the tarball to the workflow run that built it. That needs the
 `id-token: write` permission the publish job already declares, and a public
 repository.
 
+## Contributing
+
+Issues and pull requests are welcome:
+[github.com/tonoid/c/issues](https://github.com/tonoid/c/issues).
+
+Another remembered claude flag is one line: add it to `FLAGS` in `c.mjs`. Land
+work with [conventional commits](https://www.conventionalcommits.org) so the
+release notes write themselves, and run `npm test` before opening the pull
+request.
+
+## Credits
+
+**Created and maintained by [tonoid](https://www.tonoid.com)** - A microstartup
+studio building services like [2sync.com](https://2sync.com) or
+[refurb.me](https://www.refurb.me).
+
+| | |
+|---|---|
+| 💼 All tonoïd projects | [tonoid.com/projects](https://www.tonoid.com/projects) |
+| 📬 Contact | hello@tonoid.com |
+| 🐙 GitHub | [github.com/tonoid](https://github.com/tonoid) |
+
 ## License
 
-MIT
+[MIT](./LICENSE) © [tonoid.com](https://tonoid.com).
+
+---
+
+**GitHub topics**: `claude` `claude-code` `cli` `accounts` `account-switcher` `usage` `quota` `anthropic` `developer-tools` `nodejs`
