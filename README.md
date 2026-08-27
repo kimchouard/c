@@ -83,9 +83,11 @@ caches such as `~/.claude-mem` hold none of those and are ignored.
 On macOS the token is in the login keychain instead of `.credentials.json`, so
 `c` reads it with `security find-generic-password`. The first read pops the
 standard keychain dialog; Always Allow makes it the last one. Items are matched
-to config dirs by name (`Claude Code-credentials` is the default `~/.claude`,
-and the id in `~/.claude-<id>` has to appear in the item name), so an account
-whose item is named some other way lists with `no token` instead of usage.
+to config dirs by name, and Claude Code names them for the dir rather than the
+account: `Claude Code-credentials` is the default `~/.claude`, and every other
+`CLAUDE_CONFIG_DIR` gets the first 8 hex of `sha256(dir)` appended. An item
+named some other way is still matched on the id in `~/.claude-<id>`, and only
+an account matching neither lists with `no token` instead of usage.
 
 Rows sort most-recently-used first, so `c` then enter is always the account you
 were just in.
@@ -114,8 +116,9 @@ gets a `c <name> [on|off]` subcommand and a db field for free.
 - Subcommand names shadow prompts. `c status` prints the table; to send that
   word as a prompt use `c -a main status`.
 - On macOS, whether two accounts can coexist depends on Claude Code giving each
-  `CLAUDE_CONFIG_DIR` its own keychain item. If your version reuses one item,
-  `c add` overwrites the login you already had rather than adding to it.
+  `CLAUDE_CONFIG_DIR` its own keychain item. Versions that hash the dir into the
+  item name do; one that reuses a single item would have `c add` overwrite the
+  login you already had rather than add to it.
 - The menu assumes its footer fits on one terminal line; a very narrow window
   can leave a stale line behind on redraw.
 
