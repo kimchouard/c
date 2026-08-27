@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 export const HOME = os.homedir()
@@ -37,10 +38,18 @@ let cachedServices
 export const keychainServices = (dump = () => sh('security', ['dump-keychain']) || '') =>
   (cachedServices ??= [...dump().matchAll(/"svce"<blob>="([^"]*)"/g)].map(m => m[1]).filter(s => /claude/i.test(s)))
 
-// Only the item name says which account it belongs to. Claude Code stores the
-// default one as "Claude Code-credentials" and puts the id of ~/.claude-<id>
-// in the name of the others.
-export function keychainService (id, names = keychainServices()) {
+// Only the item name says which account it belongs to, and Claude Code names it
+// after the config dir rather than the account: "Claude Code-credentials" for a
+// default ~/.claude, and that name with the first 8 hex of sha256(dir) appended
+// for every other CLAUDE_CONFIG_DIR. The hash is authoritative, so it is tried
+// first; the id-in-the-name match behind it keeps working for a build that
+// spells the item out, and the lone-item guess covers a renamed default.
+export const keychainSuffix = dir => createHash('sha256').update(dir).digest('hex').slice(0, 8)
+
+export function keychainService (dir, names = keychainServices()) {
+  const hashed = `Claude Code-credentials-${keychainSuffix(dir)}`
+  if (names.includes(hashed)) return hashed
+  const id = accountId(dir)
   const hit = names.find(n => new RegExp(`(^|[^a-z0-9])${id.replace(/[^\w.-]/g, '')}([^a-z0-9]|$)`, 'i').test(n))
   if (hit || id !== 'main') return hit || null
   return names.find(n => /^claude code-credentials$/i.test(n)) || (names.length === 1 ? names[0] : null)
@@ -49,7 +58,7 @@ export function keychainService (id, names = keychainServices()) {
 export function readCreds (dir) {
   const file = readJson(path.join(dir, '.credentials.json'))
   if (file || !MAC) return file
-  const svc = keychainService(accountId(dir))
+  const svc = keychainService(dir)
   const raw = svc && sh('security', ['find-generic-password', '-s', svc, '-w'])
   return raw ? parse(raw.trim()) : null
 }
@@ -98,7 +107,7 @@ export function loggedIn (dir, home = HOME) {
   if (fs.existsSync(path.join(dir, '.credentials.json'))) return true
   const acc = oauthAccount(dir, home)
   if (acc.accountUuid || acc.emailAddress) return true
-  return MAC && !!keychainService(accountId(dir))
+  return MAC && !!keychainService(dir)
 }
 
 export function discover (home = HOME, order = []) {

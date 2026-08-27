@@ -7,7 +7,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-import { until, planLabel, sortByRecent, discover, table, loadDb, fetchUsage, defaultFlags, keychainService } from '../c.mjs'
+import { until, planLabel, sortByRecent, discover, table, loadDb, fetchUsage, defaultFlags, keychainService, keychainSuffix } from '../c.mjs'
 
 const CLI = fileURLToPath(new URL('../c.mjs', import.meta.url))
 const NOW = Date.parse('2026-08-19T12:00:00Z')
@@ -94,10 +94,25 @@ test('discover keeps an account whose token lives outside the config dir', () =>
 
 test('keychainService matches an item to the config dir it belongs to', () => {
   const names = ['Claude Code-credentials', 'Claude Code-credentials-work']
-  assert.equal(keychainService('work', names), 'Claude Code-credentials-work')
-  assert.equal(keychainService('main', names), 'Claude Code-credentials', 'the unnamed item is the default dir')
-  assert.equal(keychainService('team', names), null, 'no guessing for an account with no item')
-  assert.equal(keychainService('main', ['Claude Code']), 'Claude Code', 'a lone claude item is the default dir whatever it is called')
+  assert.equal(keychainService('/home/u/.claude-work', names), 'Claude Code-credentials-work')
+  assert.equal(keychainService('/home/u/.claude', names), 'Claude Code-credentials', 'the unnamed item is the default dir')
+  assert.equal(keychainService('/home/u/.claude-team', names), null, 'no guessing for an account with no item')
+  assert.equal(keychainService('/home/u/.claude', ['Claude Code']), 'Claude Code', 'a lone claude item is the default dir whatever it is called')
+})
+
+test('keychainService prefers the hash of the config dir over the account id', () => {
+  // What Claude Code actually writes: the item is named for the dir it was told
+  // to use, so the id never appears and only the hash finds it.
+  const dir = '/home/u/.claude-work'
+  const hashed = `Claude Code-credentials-${keychainSuffix(dir)}`
+  assert.equal(keychainSuffix(dir).length, 8)
+  assert.equal(keychainService(dir, [hashed]), hashed, 'an id-less item still resolves')
+  assert.equal(
+    keychainService(dir, ['Claude Code-credentials-work', hashed]),
+    hashed,
+    'the hash wins over a same-named item belonging to another dir'
+  )
+  assert.notEqual(keychainSuffix(dir), keychainSuffix('/other/.claude-work'), 'the same id under a different home hashes apart')
 })
 
 test('discover labels an account with no profile yet', () => {
