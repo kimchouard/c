@@ -135,12 +135,15 @@ test('table aligns every column, including a row whose usage failed', () => {
 
 test('table shows a reset per window, not just the 5h one', () => {
   const accounts = [{ id: 'a', name: 'personal', plan: 'max 20x' }]
-  const usage = { a: { five: { pct: 9, resets: '2026-08-19T14:00:00Z' }, week: { pct: 91, resets: '2026-08-26T15:00:00Z' } } }
+  // table() reads the real clock, so the fixture has to stay in the future or
+  // both windows render as "now" and the two columns stop being tellable apart.
+  const ahead = ms => new Date(Date.now() + ms).toISOString()
+  const usage = { a: { five: { pct: 9, resets: ahead(2 * 3600e3) }, week: { pct: 91, resets: ahead(5 * 86400e3) } } }
   const [head, row] = table(accounts, usage).split('\n')
   assert.equal(head.match(/resets/g).length, 2, 'one resets header per window')
   // Both reset headers sit at or left of their value, and in window order.
-  const fiveAt = row.indexOf(until('2026-08-19T14:00:00Z'))
-  const weekAt = row.indexOf(until('2026-08-26T15:00:00Z'))
+  const fiveAt = row.indexOf(until(usage.a.five.resets))
+  const weekAt = row.indexOf(until(usage.a.week.resets))
   assert.ok(fiveAt > row.indexOf('9%') && fiveAt < row.indexOf('91%'), '5h reset sits between the two percentages')
   assert.ok(weekAt > row.indexOf('91%'), 'week reset sits after the week percentage')
 })
