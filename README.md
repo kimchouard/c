@@ -60,6 +60,7 @@ message reads from it.
 | `c -a <id> [args...]` | A specific account, by id or display name. |
 | `c status` | Table only. Also `c ls`. |
 | `c add <id>` | Create `~/.claude-<id>` and log in to it. |
+| `c remove <id>` | Delete `~/.claude-<id>` and the keychain item it owns. Asks first; `--yes` skips the question. Also `c rm`. |
 | `c yolo [on\|off]` | Toggle the `--dangerously-skip-permissions` default. On. |
 | `c worktree [on\|off]` | Toggle the `--worktree` default, a git worktree per session. Off. |
 | `c version`, `c help` | |
@@ -100,6 +101,18 @@ work.
 
 Launching sets `CLAUDE_CONFIG_DIR` for the child process only, so two terminals
 can run two accounts at once.
+
+Removing is the mirror of `c add`, and the only thing here that destroys
+anything, so it is deliberately narrow:
+
+- It asks before it deletes, and refuses outright when stdin is not a terminal
+  unless you pass `--yes`. A piped `c remove work` deletes nothing.
+- It will not delete `~/.claude`. That directory holds your settings, projects
+  and history, not just a login; log out from inside `claude` instead.
+- It deletes a keychain item only when the name says that item belongs to this
+  directory. Reading a token tolerates a guess, because the worst case is a
+  misreported percentage. Deleting does not: the guess could belong to another
+  account, and logging that one out is not undoable.
 
 ## State
 
